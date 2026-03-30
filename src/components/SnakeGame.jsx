@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Play, Pause, RotateCcw, Trophy, Gamepad2, Volume2, VolumeX } from 'lucide-react';
 
 const GRID_SIZE = 20;
 const CELL_SIZE = 25;
 const INITIAL_SNAKE = [{ x: 10, y: 10 }];
-const INITIAL_DIRECTION = { x: 1, y: 0 }; // ← Bouge automatiquement à droite
+const INITIAL_DIRECTION = { x: 1, y: 0 };
 
 const DIFFICULTY_SPEEDS = {
   debutant: 180,
@@ -31,141 +31,146 @@ const SnakeGame = () => {
   const [difficulty, setDifficulty] = useState('moyen');
   const [showDifficultyMenu, setShowDifficultyMenu] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  
- const directionRef = useRef(INITIAL_DIRECTION);
-const gameLoopRef = useRef(null);
-const backgroundMusicRef = useRef(null);
-const audioContextRef = useRef(null);
- // Créer le contexte audio une seule fois
-const getAudioContext = () => {
-  if (!audioContextRef.current) {
-    audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
-  }
-  return audioContextRef.current;
-};
 
-// Musique de fond en boucle
-const startBackgroundMusic = () => {
-  if (isMuted || backgroundMusicRef.current) return;
-  
-  try {
-    const audioContext = getAudioContext();
-    
-    // Créer une mélodie simple en boucle
-    const playNote = (frequency, startTime, duration) => {
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-      
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-      
-      oscillator.frequency.value = frequency;
-      oscillator.type = 'square';
-      
-      gainNode.gain.setValueAtTime(0.05, startTime); // Volume très bas
-      gainNode.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
-      
-      oscillator.start(startTime);
-      oscillator.stop(startTime + duration);
-    };
-    
-    // Mélodie simple qui se répète
-    const melody = [
-      { freq: 523, duration: 0.2 }, // Do
-      { freq: 587, duration: 0.2 }, // Ré
-      { freq: 659, duration: 0.2 }, // Mi
-      { freq: 587, duration: 0.2 }, // Ré
-    ];
-    
-    let currentTime = audioContext.currentTime;
-    
-    const playMelody = () => {
-      melody.forEach((note, index) => {
-        playNote(note.freq, currentTime + (index * 0.25), note.duration);
-      });
-      currentTime += melody.length * 0.25;
-      
-      // Répéter toutes les 1 seconde
-      backgroundMusicRef.current = setTimeout(playMelody, 1000);
-    };
-    
-    playMelody();
-  } catch (e) {
-    console.log('Audio non disponible');
-  }
-};
+  const directionRef = useRef(INITIAL_DIRECTION);
+  const gameLoopRef = useRef(null);
+  const backgroundMusicRef = useRef(null);
+  const audioContextRef = useRef(null);
 
-const stopBackgroundMusic = () => {
-  if (backgroundMusicRef.current) {
-    clearTimeout(backgroundMusicRef.current);
-    backgroundMusicRef.current = null;
-  }
-};
+  // FIX Bug 2 : refs pour les valeurs utilisées dans les fonctions audio et game loop
+  const isMutedRef = useRef(false);
+  const foodRef = useRef({ x: 15, y: 15 });
+  const scoreRef = useRef(0);
+  const highScoreRef = useRef(0);
 
-const playEatSound = () => {
-  if (isMuted) return;
-  try {
-    const audioContext = getAudioContext();
-    const oscillator = audioContext.createOscillator();
-    const gainNode = audioContext.createGain();
-    oscillator.connect(gainNode);
-    gainNode.connect(audioContext.destination);
-    oscillator.frequency.value = 800;
-    oscillator.type = 'sine';
-    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
-    oscillator.start(audioContext.currentTime);
-    oscillator.stop(audioContext.currentTime + 0.1);
-  } catch (e) {
-    console.log('Audio non disponible');
-  }
-};
+  // Synchronisation des refs avec les états
+  useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
+  useEffect(() => { foodRef.current = food; }, [food]);
+  useEffect(() => { scoreRef.current = score; }, [score]);
+  useEffect(() => { highScoreRef.current = highScore; }, [highScore]);
 
-const playGameOverSound = () => {
-  if (isMuted) return;
-  stopBackgroundMusic(); // Arrêter la musique de fond
-  try {
-    const audioContext = getAudioContext();
-    const oscillator = audioContext.createOscillator();
-    const gainNode = audioContext.createGain();
-    oscillator.connect(gainNode);
-    gainNode.connect(audioContext.destination);
-    oscillator.frequency.setValueAtTime(400, audioContext.currentTime);
-    oscillator.frequency.exponentialRampToValueAtTime(100, audioContext.currentTime + 0.5);
-    oscillator.type = 'sawtooth';
-    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
-    oscillator.start(audioContext.currentTime);
-    oscillator.stop(audioContext.currentTime + 0.5);
-  } catch (e) {
-    console.log('Audio non disponible');
-  }
-};
+  const getAudioContext = () => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return audioContextRef.current;
+  };
 
-const playWinSound = () => {
-  if (isMuted) return;
-  stopBackgroundMusic(); // Arrêter la musique de fond
-  try {
-    const audioContext = getAudioContext();
-    [600, 800, 1000].forEach((freq, index) => {
+  const startBackgroundMusic = () => {
+    if (isMutedRef.current || backgroundMusicRef.current) return;
+
+    try {
+      const audioContext = getAudioContext();
+
+      const playNote = (frequency, startTime, duration) => {
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        oscillator.frequency.value = frequency;
+        oscillator.type = 'square';
+        gainNode.gain.setValueAtTime(0.05, startTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+        oscillator.start(startTime);
+        oscillator.stop(startTime + duration);
+      };
+
+      const melody = [
+        { freq: 523, duration: 0.2 },
+        { freq: 587, duration: 0.2 },
+        { freq: 659, duration: 0.2 },
+        { freq: 587, duration: 0.2 },
+      ];
+
+      let currentTime = audioContext.currentTime;
+
+      const playMelody = () => {
+        melody.forEach((note, index) => {
+          playNote(note.freq, currentTime + (index * 0.25), note.duration);
+        });
+        currentTime += melody.length * 0.25;
+        backgroundMusicRef.current = setTimeout(playMelody, 1000);
+      };
+
+      playMelody();
+    } catch (e) {
+      console.log('Audio non disponible');
+    }
+  };
+
+  const stopBackgroundMusic = () => {
+    if (backgroundMusicRef.current) {
+      clearTimeout(backgroundMusicRef.current);
+      backgroundMusicRef.current = null;
+    }
+  };
+
+  // FIX Bug 2 : utilisation de isMutedRef.current au lieu de isMuted
+  const playEatSound = () => {
+    if (isMutedRef.current) return;
+    try {
+      const audioContext = getAudioContext();
       const oscillator = audioContext.createOscillator();
       const gainNode = audioContext.createGain();
       oscillator.connect(gainNode);
       gainNode.connect(audioContext.destination);
-      oscillator.frequency.value = freq;
+      oscillator.frequency.value = 800;
       oscillator.type = 'sine';
-      const startTime = audioContext.currentTime + (index * 0.15);
-      gainNode.gain.setValueAtTime(0.3, startTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + 0.2);
-      oscillator.start(startTime);
-      oscillator.stop(startTime + 0.2);
-    });
-  } catch (e) {
-    console.log('Audio non disponible');
-  }
-};
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.1);
+    } catch (e) {
+      console.log('Audio non disponible');
+    }
+  };
 
-  const generateFood = useCallback(() => {
+  const playGameOverSound = () => {
+    if (isMutedRef.current) return;
+    stopBackgroundMusic();
+    try {
+      const audioContext = getAudioContext();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      oscillator.frequency.setValueAtTime(400, audioContext.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(100, audioContext.currentTime + 0.5);
+      oscillator.type = 'sawtooth';
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.5);
+    } catch (e) {
+      console.log('Audio non disponible');
+    }
+  };
+
+  const playWinSound = () => {
+    if (isMutedRef.current) return;
+    stopBackgroundMusic();
+    try {
+      const audioContext = getAudioContext();
+      [600, 800, 1000].forEach((freq, index) => {
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        oscillator.frequency.value = freq;
+        oscillator.type = 'sine';
+        const startTime = audioContext.currentTime + (index * 0.15);
+        gainNode.gain.setValueAtTime(0.3, startTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + 0.2);
+        oscillator.start(startTime);
+        oscillator.stop(startTime + 0.2);
+      });
+    } catch (e) {
+      console.log('Audio non disponible');
+    }
+  };
+
+  // FIX Bug 3 : génération de nourriture inline avec prevSnake pour éviter les positions sur le serpent
+  const generateFoodFromSnake = (currentSnake) => {
     let newFood;
     let attempts = 0;
     do {
@@ -174,60 +179,65 @@ const playWinSound = () => {
         y: Math.floor(Math.random() * GRID_SIZE)
       };
       attempts++;
-    } while (snake.some(segment => segment.x === newFood.x && segment.y === newFood.y) && attempts < 100);
+    } while (
+      currentSnake.some(segment => segment.x === newFood.x && segment.y === newFood.y) &&
+      attempts < 100
+    );
     return newFood;
-  }, [snake]);
+  };
 
   const startGame = (selectedDifficulty) => {
-  setGameStarted(true);
-  setIsPaused(false);
-  setGameOver(false);
-  setGameWon(false);
-  setSnake(INITIAL_SNAKE);
-  setDirection(INITIAL_DIRECTION);
-  directionRef.current = INITIAL_DIRECTION;
-  setScore(0);
-  setFood(generateFood());
-  setDifficulty(selectedDifficulty);
-  setShowDifficultyMenu(false);
-  
-  // Démarrer la musique de fond
-  startBackgroundMusic();
-};
-const resetGame = () => {
-  setGameStarted(false);
-  setIsPaused(true);
-  setGameOver(false);
-  setGameWon(false);
-  setSnake(INITIAL_SNAKE);
-  setDirection(INITIAL_DIRECTION);
-  directionRef.current = INITIAL_DIRECTION;
-  setScore(0);
-  setFood({ x: 15, y: 15 });
-  setShowDifficultyMenu(false);
-  
-  // Arrêter la musique
-  stopBackgroundMusic();
-};
+    const initialFood = generateFoodFromSnake(INITIAL_SNAKE);
+    setFood(initialFood);
+    foodRef.current = initialFood;
+    setGameStarted(true);
+    setIsPaused(false);
+    setGameOver(false);
+    setGameWon(false);
+    setSnake(INITIAL_SNAKE);
+    setDirection(INITIAL_DIRECTION);
+    directionRef.current = INITIAL_DIRECTION;
+    setScore(0);
+    scoreRef.current = 0;
+    setDifficulty(selectedDifficulty);
+    setShowDifficultyMenu(false);
+    startBackgroundMusic();
+  };
+
+  const resetGame = () => {
+    setGameStarted(false);
+    setIsPaused(true);
+    setGameOver(false);
+    setGameWon(false);
+    setSnake(INITIAL_SNAKE);
+    setDirection(INITIAL_DIRECTION);
+    directionRef.current = INITIAL_DIRECTION;
+    setScore(0);
+    scoreRef.current = 0;
+    setFood({ x: 15, y: 15 });
+    foodRef.current = { x: 15, y: 15 };
+    setShowDifficultyMenu(false);
+    stopBackgroundMusic();
+  };
 
   const togglePause = () => {
     if (gameStarted && !gameOver && !gameWon) {
-      setIsPaused(!isPaused);
+      setIsPaused(prev => !prev);
     }
   };
 
   const toggleMute = () => {
-  const newMutedState = !isMuted;
-  setIsMuted(newMutedState);
-  
-  if (newMutedState) {
-    // Si on coupe le son, arrêter la musique
-    stopBackgroundMusic();
-  } else if (gameStarted && !isPaused && !gameOver && !gameWon) {
-    // Si on réactive le son et que le jeu est en cours, relancer la musique
-    startBackgroundMusic();
-  }
-};
+    const newMutedState = !isMutedRef.current;
+    setIsMuted(newMutedState);
+    isMutedRef.current = newMutedState;
+
+    if (newMutedState) {
+      stopBackgroundMusic();
+    } else if (gameStarted && !isPaused && !gameOver && !gameWon) {
+      startBackgroundMusic();
+    }
+  };
+
   useEffect(() => {
     const handleKeyPress = (e) => {
       if (!gameStarted) {
@@ -248,38 +258,29 @@ const resetGame = () => {
 
       const key = e.key.toLowerCase();
       const currentDir = directionRef.current;
-
       let newDirection = null;
 
       switch (key) {
         case 'arrowup':
         case 'z':
         case 'w':
-          if (currentDir.y === 0) {
-            newDirection = { x: 0, y: -1 };
-          }
+          if (currentDir.y === 0) newDirection = { x: 0, y: -1 };
           e.preventDefault();
           break;
         case 'arrowdown':
         case 's':
-          if (currentDir.y === 0) {
-            newDirection = { x: 0, y: 1 };
-          }
+          if (currentDir.y === 0) newDirection = { x: 0, y: 1 };
           e.preventDefault();
           break;
         case 'arrowleft':
         case 'q':
         case 'a':
-          if (currentDir.x === 0) {
-            newDirection = { x: -1, y: 0 };
-          }
+          if (currentDir.x === 0) newDirection = { x: -1, y: 0 };
           e.preventDefault();
           break;
         case 'arrowright':
         case 'd':
-          if (currentDir.x === 0) {
-            newDirection = { x: 1, y: 0 };
-          }
+          if (currentDir.x === 0) newDirection = { x: 1, y: 0 };
           e.preventDefault();
           break;
         default:
@@ -296,11 +297,11 @@ const resetGame = () => {
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [gameStarted, isPaused, gameOver, gameWon]);
 
+  // FIX Bug 1 : game loop sans generateFood ni food/score/highScore dans les deps
+  // Tout passe par les refs pour éviter la recréation de l'intervalle à chaque tick
   useEffect(() => {
     if (!gameStarted || isPaused || gameOver || gameWon) {
-      if (gameLoopRef.current) {
-        clearInterval(gameLoopRef.current);
-      }
+      if (gameLoopRef.current) clearInterval(gameLoopRef.current);
       return;
     }
 
@@ -311,47 +312,55 @@ const resetGame = () => {
           y: prevSnake[0].y + directionRef.current.y
         };
 
+        // Collision mur
         if (
-          newHead.x < 0 ||
-          newHead.x >= GRID_SIZE ||
-          newHead.y < 0 ||
-          newHead.y >= GRID_SIZE
+          newHead.x < 0 || newHead.x >= GRID_SIZE ||
+          newHead.y < 0 || newHead.y >= GRID_SIZE
         ) {
           setGameOver(true);
           setIsPaused(true);
           playGameOverSound();
-          if (score > highScore) {
-            setHighScore(score);
+          if (scoreRef.current > highScoreRef.current) {
+            setHighScore(scoreRef.current);
+            highScoreRef.current = scoreRef.current;
           }
           return prevSnake;
         }
 
-        if (prevSnake.some(segment => segment.x === newHead.x && segment.y === newHead.y)) {
+        // Collision corps
+        if (prevSnake.some(seg => seg.x === newHead.x && seg.y === newHead.y)) {
           setGameOver(true);
           setIsPaused(true);
           playGameOverSound();
-          if (score > highScore) {
-            setHighScore(score);
+          if (scoreRef.current > highScoreRef.current) {
+            setHighScore(scoreRef.current);
+            highScoreRef.current = scoreRef.current;
           }
           return prevSnake;
         }
 
         const newSnake = [newHead, ...prevSnake];
 
-        if (newHead.x === food.x && newHead.y === food.y) {
-          const newScore = score + 1;
+        // FIX Bug 3 : on utilise foodRef.current et prevSnake directement
+        if (newHead.x === foodRef.current.x && newHead.y === foodRef.current.y) {
+          const newScore = scoreRef.current + 1;
           setScore(newScore);
-          
+          scoreRef.current = newScore;
+
           const goal = DIFFICULTY_GOALS[difficulty];
           if (newScore >= goal) {
             setGameWon(true);
             setIsPaused(true);
             playWinSound();
-            if (newScore > highScore) {
+            if (newScore > highScoreRef.current) {
               setHighScore(newScore);
+              highScoreRef.current = newScore;
             }
           } else {
-            setFood(generateFood());
+            // FIX Bug 3 : génération avec le vrai serpent à jour (newSnake)
+            const newFood = generateFoodFromSnake(newSnake);
+            setFood(newFood);
+            foodRef.current = newFood;
             playEatSound();
           }
         } else {
@@ -365,11 +374,9 @@ const resetGame = () => {
     const speed = DIFFICULTY_SPEEDS[difficulty];
     gameLoopRef.current = setInterval(moveSnake, speed);
     return () => {
-      if (gameLoopRef.current) {
-        clearInterval(gameLoopRef.current);
-      }
+      if (gameLoopRef.current) clearInterval(gameLoopRef.current);
     };
-  }, [gameStarted, isPaused, gameOver, gameWon, food, score, highScore, generateFood, difficulty]);
+  }, [gameStarted, isPaused, gameOver, gameWon, difficulty]);
 
   const getHeadRotation = () => {
     if (directionRef.current.x === 1) return 'rotate(0deg)';
@@ -380,7 +387,7 @@ const resetGame = () => {
   };
 
   const getDifficultyLabel = () => {
-    switch(difficulty) {
+    switch (difficulty) {
       case 'debutant': return '🟢 Débutant';
       case 'moyen': return '🟡 Moyen';
       case 'avance': return '🔴 Avancé';
@@ -388,9 +395,7 @@ const resetGame = () => {
     }
   };
 
-  const getDifficultyGoal = () => {
-    return DIFFICULTY_GOALS[difficulty];
-  };
+  const getDifficultyGoal = () => DIFFICULTY_GOALS[difficulty];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-indigo-900 to-blue-900 flex items-center justify-center p-8">
@@ -457,7 +462,8 @@ const resetGame = () => {
                 }}
               >
                 <div className="relative w-full h-full">
-                  <div className="absolute inset-0 bg-gradient-to-br from-red-500 via-red-600 to-red-700 rounded-full shadow-lg animate-pulse"
+                  <div
+                    className="absolute inset-0 bg-gradient-to-br from-red-500 via-red-600 to-red-700 rounded-full shadow-lg animate-pulse"
                     style={{
                       boxShadow: '0 0 20px rgba(239, 68, 68, 0.6), inset -3px -3px 6px rgba(0,0,0,0.3), inset 3px 3px 6px rgba(255,255,255,0.3)'
                     }}
@@ -469,7 +475,6 @@ const resetGame = () => {
 
               {snake.map((segment, index) => {
                 const isHead = index === 0;
-                
                 if (isHead) {
                   return (
                     <div
@@ -484,7 +489,8 @@ const resetGame = () => {
                         zIndex: 10
                       }}
                     >
-                      <div className="relative w-full h-full bg-gradient-to-br from-green-400 via-green-500 to-green-600 rounded-lg"
+                      <div
+                        className="relative w-full h-full bg-gradient-to-br from-green-400 via-green-500 to-green-600 rounded-lg"
                         style={{
                           boxShadow: '0 0 20px rgba(16, 185, 129, 0.8), inset -2px -2px 4px rgba(0,0,0,0.3)'
                         }}
@@ -538,21 +544,21 @@ const resetGame = () => {
                         onClick={() => startGame('debutant')}
                         className="w-64 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transform transition hover:scale-105"
                       >
-                        🟢 Débutant<br/>
+                        🟢 Débutant<br />
                         <span className="text-sm">(5 pommes pour gagner)</span>
                       </button>
                       <button
                         onClick={() => startGame('moyen')}
                         className="w-64 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white font-bold py-3 px-6 rounded-xl shadow-lg transform transition hover:scale-105"
                       >
-                        🟡 Moyen<br/>
+                        🟡 Moyen<br />
                         <span className="text-sm">(10 pommes pour gagner)</span>
                       </button>
                       <button
                         onClick={() => startGame('avance')}
                         className="w-64 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transform transition hover:scale-105"
                       >
-                        🔴 Avancé<br/>
+                        🔴 Avancé<br />
                         <span className="text-sm">(20 pommes pour gagner)</span>
                       </button>
                     </div>
@@ -599,15 +605,13 @@ const resetGame = () => {
 
           <div className="flex gap-3 justify-center items-center">
             {!gameStarted || gameOver || gameWon ? (
-              <>
-                <button
-                  onClick={() => setShowDifficultyMenu(true)}
-                  className="flex items-center gap-2 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold py-4 px-8 rounded-xl shadow-lg transform transition hover:scale-105 active:scale-95"
-                >
-                  <Play className="w-6 h-6" />
-                  {gameOver || gameWon ? 'Rejouer' : 'Jouer'}
-                </button>
-              </>
+              <button
+                onClick={() => setShowDifficultyMenu(true)}
+                className="flex items-center gap-2 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold py-4 px-8 rounded-xl shadow-lg transform transition hover:scale-105 active:scale-95"
+              >
+                <Play className="w-6 h-6" />
+                {gameOver || gameWon ? 'Rejouer' : 'Jouer'}
+              </button>
             ) : (
               <button
                 onClick={togglePause}
@@ -617,7 +621,7 @@ const resetGame = () => {
                 {isPaused ? 'Reprendre' : 'Pause'}
               </button>
             )}
-            
+
             <button
               onClick={resetGame}
               className="flex items-center gap-2 bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white font-bold py-4 px-8 rounded-xl shadow-lg transform transition hover:scale-105 active:scale-95"
@@ -629,7 +633,7 @@ const resetGame = () => {
             <button
               onClick={toggleMute}
               className="flex items-center gap-2 bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white font-bold py-4 px-4 rounded-xl shadow-lg transform transition hover:scale-105 active:scale-95"
-              title={isMuted ? "Activer le son" : "Couper le son"}
+              title={isMuted ? 'Activer le son' : 'Couper le son'}
             >
               {isMuted ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
             </button>
